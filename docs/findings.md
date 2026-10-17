@@ -215,3 +215,13 @@ Working config/state confirmed from the live logs:
     `served_name()` case for deepseek was returning the WRONG name
     (`deepseek-v4-flash-vision` vs actual `orcarouter-deepseek-v4-flash-vision-uncensored`),
     so it's corrected.
+14. **deepseek's pinned image is DANGLING -> a `podman image prune` would DELETE it.**
+    The deepseek recipe pins `eugr/spark-vllm-b12x@sha256:d7213eea...`, but that image sat
+    UNTAGGED (`<none>` id `22338a4c37d3`), so `podman image exists <digest>` reported MISSING
+    and a blanket `podman image prune` would have removed it and broken deepseek. It is now
+    TAGGED `eugr/spark-vllm-b12x:deepseek-v4-flash-vision-uncensored` (same digest), which
+    both makes the digest resolve and protects it from any future prune. Rule for reclaiming
+    image space here: tag a pinned-by-digest image before pruning, keep `eugr:latest` (GLM
+    `03a9565`) + the deepseek tag, and prune only the local-build stacks
+    (`vllm-node-b12x-vision`, `dspark-vllm-gx10`, sglang). Podman refcounts layers, so a
+    running image and both pins survive a prune of unrelated layers.

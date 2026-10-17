@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import os
 import shlex
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -186,7 +187,7 @@ class ProgressScreen(ModalScreen[None]):
             cmd = ["sudo", "-u", "wfoster", "podman", "logs", "-f", self.container]
         else:
             cmd = ["podman", "logs", "-f", self.container]
-        self._log_proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+        self._log_proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, start_new_session=True)
         self._log_task = asyncio.create_task(self._pump_log())
 
     async def _pump_log(self) -> None:
@@ -221,7 +222,20 @@ class ProgressScreen(ModalScreen[None]):
         if getattr(self, "_log_task", None):
             self._log_task.cancel()
         if self._log_proc:
-            self._log_proc.kill()
+            # Kill the whole process group (sudo + the podman logs child), then
+            # wait() so the child is reaped — otherwise a `sudo <defunct>` zombie
+            # is left behind (the motd "N zombie processes" count).
+            try:
+                os.killpg(os.getpgid(self._log_proc.pid), signal.SIGKILL)
+            except Exception:  # noqa: BLE001
+                try:
+                    self._log_proc.kill()
+                except Exception:  # noqa: BLE001
+                    pass
+            try:
+                self._log_proc.wait(timeout=5)
+            except Exception:  # noqa: BLE001
+                pass
             if self._log_proc.stdout:
                 try:
                     self._log_proc.stdout.close()
