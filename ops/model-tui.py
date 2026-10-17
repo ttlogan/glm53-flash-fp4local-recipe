@@ -359,6 +359,8 @@ class ModelTui(App):
         label = next((f"{n} ({key})" for k, n, _ in MODELS if k == key), key)
         if key == self.active:
             actions = ["restart", "stop"]
+        elif self.active is None:
+            actions = ["start"]
         else:
             actions = ["switch"]
         self.push_screen(ActionScreen(label, actions), self._on_action_chosen)
@@ -368,17 +370,18 @@ class ModelTui(App):
             return
         key = self.selected
         msg = {
+            "start": f"Start '{key}'? Loads {key} on :8000 (a few minutes while it loads).",
             "switch": f"Switch to '{key}'? This stops the current model and loads {key} (several minutes).",
             "restart": f"Restart the active model '{key}'? Clean stop, then reload. This is a few minutes of downtime.",
             "stop": f"Stop the active model '{key}'? :8000 will be freed; boot will bring back your last-used model.",
         }[choice]
         # stop has no destructive-reload risk but is a deliberate downtime; all are danger-ish.
-        self.push_screen(ConfirmScreen(msg, danger=(choice != "switch")), lambda c: self._on_action_confirmed(c, key, choice))
+        self.push_screen(ConfirmScreen(msg, danger=(choice not in ("start", "switch"))), lambda c: self._on_action_confirmed(c, key, choice))
 
     def _on_action_confirmed(self, confirmed: bool, key: str, choice: str) -> None:
         if not confirmed:
             return
-        args = {"switch": ["--swap", key], "restart": ["restart"], "stop": ["--stop"]}[choice]
+        args = {"start": ["--swap", key], "switch": ["--swap", key], "restart": ["restart"], "stop": ["--stop"]}[choice]
         self._run_action(args, f"{choice.capitalize()} {key}...", CONTAINERS.get(key))
 
     def _run_action(self, args: list[str], heading: str, container: str | None = None) -> None:
