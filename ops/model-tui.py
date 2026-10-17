@@ -22,6 +22,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+import json
+import urllib.request
+
 from textual.app import App, ComposeResult
 from textual.containers import Vertical
 from textual.widgets import Footer, Header, Label, ListItem, ListView, LoadingIndicator, Log
@@ -43,6 +46,13 @@ CONTAINERS = {
     "qwen38": "vllm-fn",
 }
 
+# lane_key -> served model name (sync with swap-model.sh served_name()).
+SERVED = {
+    "deepseek": "orcarouter-deepseek-v4-flash-vision-uncensored",
+    "glm": "dgx_hobo_default",
+    "qwen38": "qwen3.8-flash-next-uncensored",
+}
+
 
 def run(args: list[str], timeout: int = 1800, capture: bool = True) -> subprocess.CompletedProcess:
     """Run a swap-model.sh subcommand. `timeout` is large because swaps block on load."""
@@ -50,30 +60,33 @@ def run(args: list[str], timeout: int = 1800, capture: bool = True) -> subproces
     return subprocess.run(cmd, capture_output=capture, text=True, timeout=timeout, check=False)
 
 
-STATE_FILE = "/etc/vllm/current_model"
+def _serving_lane() -> str | None:
+    """Return the lane_key whose served model actually answers on :8000, else None.
+
+    A --stop frees :8000 and leaves /etc/vllm/current_model set to the boot default,
+    so the state file alone can't tell us what's live. Probe the OpenAI /v1/models
+    endpoint and match the served name back to a lane. Connection-refused (nothing
+    serving) returns fast.
+    """
+    try:
+        with urllib.request.urlopen("http://127.0.0.1:8000/v1/models", timeout=3) as r:
+            data = json.load(r)
+    except Exception:
+        return None
+    ids = {m.get("id") for m in data.get("data", [])}
+    for key, name in SERVED.items():
+        if name in ids:
+            return key
+    return None
 
 
 def active_model() -> str | None:
-    """Return the currently-deployed model lane key.
+    """Return the lane key currently SERVING, verified against :8000 /v1/models.
 
-    Reads `/etc/vllm/current_model` (the same file `swap-model.sh` uses for the
-    default = last-used model) directly, no subprocess. Falls back to a `--health`
-    probe only if the file is unreadable. The file is what the boot ensure path
-    guarantees is serving, so it is authoritative for "active".
+    After a --stop nothing is listening, so this returns None and the ACTIVE dot
+    clears; after a load it matches the served name back to a lane.
     """
-    try:
-        with open(STATE_FILE) as fh:
-            return fh.read().strip() or None
-    except OSError:
-        pass
-    try:
-        p = run(["--health"], timeout=10)
-        for line in p.stdout.splitlines():
-            if line.startswith("current_model:"):
-                return line.split(":", 1)[1].strip()
-    except Exception:
-        pass
-    return None
+    return _serving_lane()
 
 
 class ActionScreen(ModalScreen[str | None]):
