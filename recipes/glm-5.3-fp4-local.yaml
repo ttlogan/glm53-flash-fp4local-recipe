@@ -1,0 +1,73 @@
+# GLM-5.3-Flash-FP4-Local — B12X recipe (eugr run-recipe format)
+# For a 2-node DGX Spark / GX10 (GB10, sm_121a). Model = nvidia QAD FP4.
+
+recipe_version: "1"
+name: GLM-5.3-Flash-FP4-Local
+description: vLLM B12X serving nvidia/GLM-5.3-Flash-FP4-Local on a dual DGX Spark/GX10 cluster
+
+model: nvidia/GLM-5.3-Flash-FP4-Local
+container: vllm-node-b12x
+
+build_args:
+  - --exp-b12x
+
+cluster_only: true
+
+mods: []
+
+defaults:
+  port: 8000
+  host: 0.0.0.0
+  tensor_parallel: 2
+  pipeline_parallel: 1
+  decode_context_parallel: 2
+  block_size: 256
+  max_model_len: 1048576
+  max_num_seqs: 4
+  max_num_batched_tokens: 4096
+  num_speculative_tokens: 3
+  kv_cache_memory_bytes: 8G
+  gpu_memory_utilization: 0.87
+
+env:
+  CUTE_DSL_ARCH: "sm_121a"
+  SAFETENSORS_FAST_GPU: "1"
+  VLLM_USE_V2_MODEL_RUNNER: "1"
+  VLLM_WORKER_MULTIPROC_METHOD: "spawn"
+  B12X_POLICY_MODE: "auto"
+  VLLM_B12X_MOE_FP4_FORCE_A16: "1"
+  B12X_W4A16_A4_PREFILL: "1"
+  INSTANTTENSOR_BACKEND: "BUFFERED"
+  INSTANTTENSOR_BUFFER_SIZE: "67108864"
+  INSTANTTENSOR_CHUNK_SIZE: "8388608"
+  INSTANTTENSOR_CONCURRENCY: "1"
+  INSTANTTENSOR_IO_DEPTH: "3"
+
+command: |
+  vllm serve nvidia/GLM-5.3-Flash-FP4-Local \
+    --host {host} \
+    --port {port} \
+    --tensor-parallel-size {tensor_parallel} \
+    --pipeline-parallel-size {pipeline_parallel} \
+    --decode-context-parallel-size {decode_context_parallel} \
+    --mamba-cache-mode align \
+    --enable-prefix-caching \
+    --enable-chunked-prefill \
+    --dtype bfloat16 \
+    --kv-cache-dtype fp8 \
+    --quantization modelopt_mixed \
+    --attention-backend B12X \
+    --block-size {block_size} \
+    --moe-backend b12x \
+    --linear-backend b12x \
+    --no-enable-flashinfer-autotune \
+    --load-format instanttensor \
+    --max-model-len {max_model_len} \
+    --max-num-seqs {max_num_seqs} \
+    --max-num-batched-tokens {max_num_batched_tokens} \
+    --speculative-config '{{"method":"mtp","num_speculative_tokens":{num_speculative_tokens},"moe_backend":"b12x","attention_backend":"B12X"}}' \
+    --reasoning-parser glm45 \
+    --tool-call-parser glm47 \
+    --enable-auto-tool-choice \
+    --kv-cache-memory-bytes {kv_cache_memory_bytes} \
+    --gpu-memory-utilization {gpu_memory_utilization}
