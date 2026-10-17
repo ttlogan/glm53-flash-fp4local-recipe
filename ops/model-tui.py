@@ -422,16 +422,20 @@ class ModelTui(App):
         if isinstance(self.screen, ProgressScreen):
             self.pop_screen()
         await self._rebuild_list()
+        # On success return to a clean first screen: one-line status, no log
+        # dump (the live log is available via the ProgressScreen 'l' pane while
+        # the action runs). Only a failure keeps the tail for diagnosis.
         if err:
             status = "FAILED"
             tail = err
-        elif proc is not None:
-            status = "ok" if proc.returncode == 0 else f"FAILED ({proc.returncode})"
+        elif proc is not None and proc.returncode != 0:
+            status = f"FAILED ({proc.returncode})"
             tail = (proc.stdout.strip() + "\n" + proc.stderr.strip()).strip()[-500:]
         else:
-            status = "?"
+            status = "ok"
             tail = ""
-        self.query_one("#hint", Label).update(f"{status}: swap-model.sh {shlex.join(args)}\n{tail}")
+        status_line = f"{status}: swap-model.sh {shlex.join(args)}"
+        self.query_one("#hint", Label).update(status_line if not tail else f"{status_line}\n{tail}")
         self.refresh_bindings()
 
 
