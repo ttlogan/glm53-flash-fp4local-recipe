@@ -60,6 +60,7 @@ podman run -d \
   --device nvidia.com/gpu=all \
   --network host --ipc host \
   --ulimit memlock=-1:-1 --cap-add IPC_LOCK \
+  --security-opt seccomp=unconfined \
   --device /dev/infiniband:/dev/infiniband \
   -v "${HF_CACHE}:/root/.cache/huggingface" \
   -e VLLM_HOST_IP="$HOST_IP" \
@@ -82,6 +83,7 @@ podman run -d \
   -e VLLM_B12X_MOE_FP4_FORCE_A16=1 \
   -e B12X_W4A16_A4_PREFILL=1 \
   -e VLLM_SSM_CONV_STATE_LAYOUT=DS -e VLLM_ENABLE_PCIE_ALLREDUCE=0 \
+  -e VLLM_MTP_NVFP4_LM_HEAD=0 -e VLLM_LM_HEAD_A16=1 \
   -e INSTANTTENSOR_BACKEND=BUFFERED -e INSTANTTENSOR_BUFFER_SIZE=67108864 \
   -e INSTANTTENSOR_CHUNK_SIZE=8388608 -e INSTANTTENSOR_CONCURRENCY=1 -e INSTANTTENSOR_IO_DEPTH=3 \
   "$IMAGE" \
@@ -105,7 +107,7 @@ podman run -d \
     --max-num-batched-tokens 4096 \
     --enable-prefix-caching --enable-chunked-prefill \
     --no-enable-flashinfer-autotune \
-    --speculative-config '{"method":"mtp","num_speculative_tokens":3,"moe_backend":"b12x","attention_backend":"B12X"}' \
+    --speculative-config '{"method":"mtp","num_speculative_tokens":5,"moe_backend":"humming","attention_backend":"B12X"}' \
     --tool-call-parser glm47 --enable-auto-tool-choice \
     --reasoning-parser glm45 \
     --default-chat-template-kwargs '{"reasoning_effort":"max","clear_thinking":false}' \

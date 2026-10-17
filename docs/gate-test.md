@@ -117,6 +117,47 @@ isolated:
 - Known issue: the earlier wasted pull was `sudo podman` (root) which is the WRONG
   storage; the serving containers are wfoster rootless.
 
+## 2026-10-17 — SMOKE TEST: LOAD NOW PROGRESSING (BREAKTHROUGH)
+Fresh `eugr/spark-vllm-b12x:latest` = `a7f76ae9f18c` (built 2026-10-15, post-10-05 model
+release, 18.3G). The new image resolves the RIGHT architecture: log shows
+`Resolved architecture: Glm5NextForConditionalGeneration` AND `Glm5NextMTPModel`
+(the cached 10-02 build loaded old `glm4_1v` and routed 0 shards).
+
+Second blocker found + fixed (io_uring / seccomp): after the fresh image, engine init
+failed with
+`RuntimeError: io_uring bounce initialization failed: Function not implemented; check
+liburing, kernel/container policy and locked-memory limits`
+from `flashinfer/experimental/b12x/loader/_checkpoint.py`. `Function not implemented`
+(ENOSYS) = the vLLM container's DEFAULT Podman seccomp profile blocks the io_uring_*
+syscalls. FIX: add `--security-opt seccomp=unconfined` to the launcher's `podman run`.
+After that the b12x loader routes ALL 42/42 shards (`91.99 GB selected on rank 0`).
+
+Current load state (as of log write):
+- Engine `v0.1.dev21830+g8244d1c44.d20261015`, `Resolved arch` OK, `world_size=2`
+  rank0/rank1 over NCCL (`tcp://192.168.177.11:29523`), `Selected B12xFp8BlockScaledMMKernel`
+  for linear/MLA layers, MTP `SpeculativeConfig(method=mtp, num_spec_tokens=5)`.
+- 42/42 shards routed; now in the slow COLD JIT compile + autotune:
+  `b12x compiling gemm.blockscaled_precision: 183/291 ready, 2885 compilations`,
+  `0 cached` (no pre-built artifacts). This is the humming/b12x kernel autotune sweep on a
+  320B model; research flagged it as the long/tricky phase. A background watchdog
+  (poll :8001 / container-alive, proc_d00fa0ccfd49) is attached.
+- `kernel_config`: b12x_autotune / cutedsl_warmup / jit_warmup all ON. Research suggested
+  AOT env (`VLLM_USE_AOT_COMPILE`, MEGA_AOT) to cache compiles; NOT yet applied — deferred
+  until the first clean load, to avoid stacking variables. `0 cached` = cold start each run.
+
+Research-team findings folded into the launcher (this commit):
+- speculative-config: `{method:mtp, num_speculative_tokens:5, moe_backend:humming,
+  attention_backend:B12X}` (b12x/3 is the RTX PRO value; Humming is the Spark MTP backend).
+- env `VLLM_MTP_NVFP4_LM_HEAD=0` + `VLLM_LM_HEAD_A16=1` (MTP/LM heads are A16, not NVFP4).
+- launcher `podman run` now has `--security-opt seccomp=unconfined`.
+
+Known / deferred (not fixing now):
+- model-tui live-log pane ("has never worked right"). Deferred.
+- AOT compile env (quick win) — add after first clean load.
+- Worker-first launch ordering (research: card/community start rank1 then rank0). Head-first
+  provably reached world_size=2 here, so kept the orchestration's head-first for the gate.
+
+
 
 
 
