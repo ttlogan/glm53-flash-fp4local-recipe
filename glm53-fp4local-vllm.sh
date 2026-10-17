@@ -41,8 +41,12 @@ idx="${HOST_MODEL_DIR}/model.safetensors.index.json"
   echo "nvidia GLM-5.3-Flash-FP4-Local not in HF cache: ${HOST_MODEL_DIR} (still downloading?)" >&2
   exit 4
 }
+# Count the completed shard files, not their on-disk size: in the HF cache the
+# snapshot dir's model-*.safetensors are SYMLINKS to blobs (link size ~0), and a
+# symlink only appears once its blob has fully downloaded. So symlink count ==
+# complete-shard count.
 expected=$(grep -oE 'model-[0-9]+-of-[0-9]+' "$idx" | sort -u | wc -l)
-actual=$(find "${HOST_MODEL_DIR}" -maxdepth 1 -name 'model-*.safetensors' -size +1M | wc -l)
+actual=$(find "${HOST_MODEL_DIR}" -maxdepth 1 -name 'model-*.safetensors' | wc -l)
 [[ "$expected" -gt 0 && "$actual" -ge "$expected" ]] || {
   echo "nvidia GLM-5.3-Flash-FP4-Local incomplete: ${actual}/${expected} shards (still downloading?)" >&2
   exit 4
@@ -77,10 +81,11 @@ podman run -d \
   -e B12X_POLICY_MODE=auto \
   -e VLLM_B12X_MOE_FP4_FORCE_A16=1 \
   -e B12X_W4A16_A4_PREFILL=1 \
+  -e VLLM_SSM_CONV_STATE_LAYOUT=DS -e VLLM_ENABLE_PCIE_ALLREDUCE=0 \
   -e INSTANTTENSOR_BACKEND=BUFFERED -e INSTANTTENSOR_BUFFER_SIZE=67108864 \
   -e INSTANTTENSOR_CHUNK_SIZE=8388608 -e INSTANTTENSOR_CONCURRENCY=1 -e INSTANTTENSOR_IO_DEPTH=3 \
   "$IMAGE" \
-    "${CMODEL_DIR}" \
+    vllm serve "${CMODEL_DIR}" \
     --served-model-name dgx_hobo_default \
     --host 0.0.0.0 --port "$PORT" \
     --trust-remote-code \
@@ -90,7 +95,7 @@ podman run -d \
     --attention-backend B12X \
     --moe-backend b12x \
     --linear-backend b12x \
-    --load-format instanttensor \
+    --load-format b12x \
     --mamba-cache-mode align \
     --kv-cache-dtype fp8 \
     --block-size 256 \

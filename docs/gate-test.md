@@ -74,7 +74,49 @@ published checkpoint does not carry. So the launcher/recipe 1M value is correct.
   qwen38=qwen3.8-flash-next-uncensored).
 
 ## 2026-10-17 — download monitor (continued)
-- leo: 130G -> 142G / 166G, 45/52 blobs, 8 in-flight, hf download alive. ~24G to go.
+- leo: 130G -> 142G -> 154G -> 160G / 166G, 52/52 blobs, index.json present,
+  4 in-flight, hf download alive. ~6G to go; launch once 0 incomplete.
 - qwen STOPPED (per user via model-tui) on both nodes; :8000 free; leo GPU ~112G free.
+
+## Known / deferred (not fixing now)
+- model-tui live-log pane (`ProgressScreen` 'l' toggles `podman logs -f`): user reports
+  it "has never worked right." Deferred; not part of this GLM gate.
+
+## 2026-10-17 — GLM smoke test: blocker diagnosed (IMAGE FRESHNESS)
+Repeated launch attempts on scratch :8001/29523. Two distinct failures, root cause finally
+isolated:
+1. (load-format instanttensor) `FileNotFoundError: Weight files referenced in index but
+   missing: .../tensors/native-QB.safetensors`. The checkpoint uses a NON-standard QAD
+   layout (scales in `tensors/native-QB.safetensors`, 719M, present on both nodes).
+   -> fix: `--load-format b12x` (card's DGX Spark value) which routes via B12xModelLoader.
+2. (still failing with b12x) `b12x weight loading failed: 0/0 shards routed, 0.00 GB
+   selected on rank 0`, then `RuntimeError: Engine core initialization failed`. vLLM
+   instantiated the OLD class `glm4_1v.py`, NOT a GLM-5.3 path.
+   ROOT CAUSE: the cached `eugr/spark-vllm-b12x:latest` image (v0.1.dev21553+...d20261002,
+   created 2026-10-02, digest d7213eea...) predates the 2026-10-05 model. Its model
+   registry maps `Glm53DSparkForCausalLM -> glm53_dspark` (the OLDER
+   `local-inference-lab/GLM-5.3-Flash-NVFP4-Spark` checkpoint) but NOT the nvidia
+   checkpoint's `model_type=glm5_next` / `Glm5NextForConditionalGeneration`. So vLLM
+   can't resolve the right class and the b12x loader routes 0 shards.
+   => The image must be refreshed to a build that registers Glm5NextForConditionalGeneration.
+   (Note: the eugr recipe recipes/glm-5.3-flash.yaml targets the DIFFERENT
+   `local-inference-lab/GLM-5.3-Flash-NVFP4-Spark`, not the nvidia QAD checkpoint.)
+
+## 2026-10-17 — deepseek isolation + fresh image pull
+- The deepseek recipe `orcarouter-eugr-1m.yaml` used the SAME
+  `eugr/spark-vllm-b12x:latest` tag as GLM => re-pulling :latest would silently move
+  deepseek to the new build on its next launch.
+- USER DECISION (recommended): PIN deepseek to the known-good digest
+  `eugr/spark-vllm-b12x@sha256:d7213eea8cf9e5918e26ec75f46a505a9dc66a05fbae9c20ba508d3322c28d07`
+  so it is isolated from :latest. Recipe backed up to orcarouter-eugr-1m.yaml.bak-20261017
+  and patched (container: eugr/spark-vllm-b12x@sha256:d7213eea...). No deepseek running, so
+  nothing live disturbed.
+- Fresh `eugr/spark-vllm-b12x:latest` pull started on BOTH nodes as wfoster (rootless,
+  NOT root — root podman uses a different, empty storage). Background pulls
+  proc_c31faa748a8c (leo) / proc_a192ad3a569f (raph).
+- Known issue: the earlier wasted pull was `sudo podman` (root) which is the WRONG
+  storage; the serving containers are wfoster rootless.
+
+
 
 
