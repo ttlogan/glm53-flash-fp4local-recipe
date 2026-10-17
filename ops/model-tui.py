@@ -298,7 +298,6 @@ class ModelTui(App):
         self.theme = "catppuccin-mocha"
         self.active: str | None = None
         self.selected: str = MODELS[0][0]
-        self._suppress_next_select = False
 
     def action_quit(self) -> None:
         self.exit()
@@ -343,13 +342,13 @@ class ModelTui(App):
         await self.refresh_list()
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
-        # Only open the action menu when no modal is on top (the main list is the
-        # active screen). A trailing keypress after a modal dismisses can bubble
-        # here; ignore it so we never re-open a menu for a stale selection.
-        if self._suppress_next_select:
-            self._suppress_next_select = False
-            return
-        if isinstance(self.screen, (ActionScreen, ConfirmScreen, ProgressScreen)):
+        # Only the main #models list drives the action menu. The modal screens
+        # (ActionScreen / ConfirmScreen) handle their OWN list selection in their
+        # on_list_view_selected; the ScreenStack pop is ASYNC, so at this point
+        # self.screen may still be the modal and a stale one-shot "suppress next
+        # select" latch would eat the next real Enter (the double-Enter bug).
+        # Ignoring non-#models selections removes the latch entirely.
+        if event.list_view.id != "models":
             return
         key = event.item.id  # type: ignore[attr-defined]
         self.selected = key
@@ -366,9 +365,6 @@ class ModelTui(App):
 
     def _on_action_chosen(self, choice: str | None) -> None:
         if not choice or choice == "cancel":
-            # Swallow the trailing Enter that bubbles to the main list after the
-            # menu dismisses; otherwise it re-opens the menu immediately.
-            self._suppress_next_select = True
             return
         key = self.selected
         msg = {
@@ -381,16 +377,8 @@ class ModelTui(App):
 
     def _on_action_confirmed(self, confirmed: bool, key: str, choice: str) -> None:
         if not confirmed:
-            # Swallow the trailing Enter that bubbles to the main list after the
-            # confirm dismisses; otherwise it re-opens the action menu.
-            self._suppress_next_select = True
             return
         args = {"switch": ["--swap", key], "restart": ["restart"], "stop": ["--stop"]}[choice]
-        # The SAME Enter that triggered the confirm 'Yes' dismiss also bubbles to
-        # the main list after the modal is gone. Swallow it so we don't instantly
-        # re-open an action menu for a stale selection (same class as the
-        # cancel/No latch below).
-        self._suppress_next_select = True
         self._run_action(args, f"{choice.capitalize()} {key}...", CONTAINERS.get(key))
 
     def _run_action(self, args: list[str], heading: str, container: str | None = None) -> None:
