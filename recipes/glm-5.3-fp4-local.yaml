@@ -20,7 +20,7 @@ defaults:
   host: 0.0.0.0
   tensor_parallel: 2
   pipeline_parallel: 1
-  decode_context_parallel: 2
+  decode_context_parallel: 1
   block_size: 256
   max_model_len: 1048576
   max_num_seqs: 4

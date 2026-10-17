@@ -13,27 +13,31 @@ set -euo pipefail
 NODE_RANK="${1:?usage: glm53-fp4local-vllm.sh <0|1>}"
 [[ "$NODE_RANK" == "0" || "$NODE_RANK" == "1" ]] || { echo "rank must be 0 or 1" >&2; exit 2; }
 
-IMAGE="docker.io/eugr/spark-vllm-b12x:latest"
-NAME="vllm_glm53"
+IMAGE="${IMAGE:-docker.io/eugr/spark-vllm-b12x:latest}"
+NAME="${NAME:-vllm_glm53}"
 HF_CACHE="/home/wfoster/.cache/huggingface"
 HF_REPO="models--nvidia--GLM-5.3-Flash-FP4-Local"
 REVISION="76348ddb2be2e35e39ecfc00e75dc07703f4f3d5"
 # cluster fabric: leo=.11 (head/rank0), raph=.12 (worker/rank1); master = leo
 HEAD_IP="192.168.177.11"
-MPORT="29521"
-PORT="8000"
+MPORT="${MPORT:-29521}"
+PORT="${PORT:-8000}"
 
 case "$NODE_RANK" in
   0) HOST_IP=192.168.177.11; HEADLESS="" ;;
   1) HOST_IP=192.168.177.12; HEADLESS="--headless" ;;
 esac
 
-# Resolve the model snapshot dir inside the container (HF cache is bind-mounted).
-CMODEL_DIR="$(ls -d "/root/.cache/huggingface/hub/${HF_REPO}/snapshots/"* 2>/dev/null | head -1 || true)"
-[[ -n "$CMODEL_DIR" && -f "${CMODEL_DIR}/config.json" ]] || {
+# Resolve the model snapshot dir. The checkpoint lives in wfoster's HF cache on
+# the HOST ($HF_CACHE); it is bind-mounted to /root/.cache/huggingface inside the
+# container. Use the host path for the existence check, the container path for the
+# vllm model/chat-template args.
+HOST_MODEL_DIR="$(ls -d "${HF_CACHE}/hub/${HF_REPO}/snapshots/"* 2>/dev/null | head -1 || true)"
+[[ -n "$HOST_MODEL_DIR" && -f "${HOST_MODEL_DIR}/config.json" ]] || {
   echo "nvidia GLM-5.3-Flash-FP4-Local not in HF cache: ${HF_CACHE}/hub/${HF_REPO} (still downloading?)" >&2
   exit 4
 }
+CMODEL_DIR="/root/.cache/huggingface${HOST_MODEL_DIR#${HF_CACHE}}"
 
 podman rm -f "$NAME" 2>/dev/null || true
 
@@ -71,6 +75,7 @@ podman run -d \
     --host 0.0.0.0 --port "$PORT" \
     --trust-remote-code \
     --tensor-parallel-size 2 \
+    --dtype bfloat16 \
     --quantization modelopt_mixed \
     --attention-backend B12X \
     --moe-backend b12x \
@@ -83,7 +88,6 @@ podman run -d \
     --max-model-len 1048576 \
     --max-num-seqs 4 \
     --max-num-batched-tokens 4096 \
-    --decode-context-parallel-size 2 \
     --enable-prefix-caching --enable-chunked-prefill \
     --no-enable-flashinfer-autotune \
     --speculative-config '{"method":"mtp","num_speculative_tokens":3,"moe_backend":"b12x","attention_backend":"B12X"}' \

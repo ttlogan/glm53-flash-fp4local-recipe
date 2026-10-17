@@ -70,3 +70,30 @@ NVIDIA QAD build is the same base, still not uncensored, but higher-quality FP4.
 ## Rollback
 Re-download `RedHatAI/GLM-5.3-Flash-NVFP4` (or `local-inference-lab/GLM-5.3-Flash-NVFP4`)
 and re-pull `ghcr.io/tonyd2wild/vllm-glm53-flash:sm121-v8` to restore the old lane.
+
+## Review pass 1 (2026-10-17) — fixes applied
+A byte-diff review confirmed deepseek + qwen lanes and all shared helpers in
+`swap-model.sh` are byte-identical to the pre-change backup (PASS). A serving
+review found a hard blocker + minor issues in the launcher, all now fixed in
+`glm53-fp4local-vllm.sh`:
+- FIXED (blocker): the model-dir existence check used the in-container path
+  `/root/.cache/huggingface/...` on the HOST (which is `Permission denied`, so the
+  launcher always exited). Now resolves the snapshot from `$HF_CACHE` (host) for the
+  check and maps to `/root/.cache/huggingface/...` only for the container vllm args.
+- FIXED: added `--dtype bfloat16` (card + recipe had it).
+- FIXED: dropped `--decode-context-parallel-size 2` (not in the validated launch;
+  risky on 2 GPUs). Defaults to 1; the card's verbose variant used 2, treat as
+  optional tuning to test at the gate.
+- FIXED: `PORT`/`NAME`/`MPORT` are now env-overridable so the gate smoke test can
+  run on `PORT=8001` (and a distinct `NAME`/`MPORT`) without touching qwen on :8000.
+- `MODEL_DIR` in `swap-model.sh` is a dead (documentation-only) variable; left as-is.
+- `--default-chat-template-kwargs {"reasoning_effort":"max","clear_thinking":false}`
+  matches the card's verbose 2x-Spark command (old GLM lane used
+  `{"enable_thinking":false}`); confirm intended reasoning behavior at the gate.
+
+Still to verify at the gate: fresh-image support for the QAD scale format, shard
+count vs `model.safetensors.index.json` (mid-download during this review), the 1M-ctx
+KV fit at `gpu-memory-utilization 0.87` on the 2x128G pool, `--distributed-executor-backend mp`
+(whether the B12X image's `mp` path works for 2-node, vs the deepseek lane's Ray),
+and whether `/opt/lil/runtime/templates/glm53-flash.jinja` vs the checkpoint's own
+`chat_template.jinja` is correct.
