@@ -111,10 +111,50 @@ EOF
 served_name() {
   case "$1" in
     qwen38)           echo "qwen3.8-flash-next-uncensored" ;;
-    glm)              echo "dgx_hobo_default" ;;
-    deepseek)         echo "deepseek-v4-flash-vision" ;;
+    glm)              echo "glm-5.3-flash-fp4-local" ;;
+    deepseek)         echo "orcarouter-deepseek-v4-flash-vision-uncensored" ;;
     *)                echo "$1" ;;
   esac
+}
+# Map a lane to the served context length (must match its launcher's max-model-len).
+lane_ctx() {
+  case "$1" in
+    qwen38)   echo 262144 ;;
+    glm)      echo 1048576 ;;
+    deepseek) echo 1048576 ;;
+    *)        echo 0 ;;
+  esac
+}
+# Rewrite the litellm gateway config so the stable client alias `dgx_hobo_default`
+# routes to the lane now serving on :8000 (upstream model name + context window).
+# litellm shows context from model_info.context_window (snake); the camelCase
+# `contextWindow` under litellm_params is NOT read by litellm. Restart litellm to apply.
+update_litellm() {
+  local m="$1"
+  local sn; sn=$(served_name "$m")
+  local ctx; ctx=$(lane_ctx "$m")
+  local cfg=/etc/litellm/config.yaml
+  [ -f "$cfg" ] || { echo "   (litellm config $cfg missing; skipping)" >&2; return 0; }
+  sudo cp -n "$cfg" "${cfg}.bak-swap" 2>/dev/null || true
+  sudo python3 - "$sn" "$ctx" <<'PY'
+import sys, re
+sn, ctx = sys.argv[1], sys.argv[2]
+p = "/etc/litellm/config.yaml"
+s = open(p).read()
+# 1) point the dgx_hobo_default entry's upstream model at this lane's served name
+s = re.sub(r'(model:\s*openai/)[^\n]+', r'\g<1>' + sn, s, count=1)
+# 2) drop any non-standard camelCase contextWindow line (ignored by litellm)
+s = re.sub(r'\n\s*contextWindow:\s*\d+', '', s, count=1)
+# 3) set model_info.context_window (snake, the field litellm reads)
+if 'model_info:' in s:
+    s = re.sub(r'(model_info:\s*\n\s*context_window:\s*)\d+', r'\g<1>' + ctx, s, count=1)
+else:
+    # insert a model_info block right after this entry's api_key line
+    s = re.sub(r'(    api_key: [^\n]+\n)', r'\1  model_info:\n    context_window: ' + ctx + '\n', s, count=1)
+open(p, 'w').write(s)
+PY
+  sudo systemctl restart litellm >/dev/null 2>&1 || true
+  echo "   litellm: dgx_hobo_default -> openai/$sn (ctx ${ctx})"
 }
 # Map a lane to the podman container it runs in (for TIMEOUT diagnostics on the
 # restart/boot paths, where $CONTAINER is not set by $2).
@@ -185,7 +225,7 @@ case "${1:-}" in
     for i in $(seq 1 120); do
       sleep 10
       c=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8000/health 2>/dev/null) || c=000
-      [ "$c" = "200" ] && { log "READY after ~$((i*10))s ($TARGET)"; write_motd "$TARGET"; exit 0; }
+      [ "$c" = "200" ] && { log "READY after ~$((i*10))s ($TARGET)"; write_motd "$TARGET"; update_litellm "$TARGET"; exit 0; }
       [ $((i % 6)) -eq 0 ] && log "  still loading ($((i*10))s)..."
     done
     log "TIMEOUT. Check: podman logs $CONTAINER"
@@ -211,7 +251,7 @@ case "${1:-}" in
     for i in $(seq 1 120); do
       sleep 10
       c=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8000/health 2>/dev/null) || c=000
-      [ "$c" = "200" ] && { log "READY after ~$((i*10))s ($CUR)"; write_motd "$CUR"; exit 0; }
+      [ "$c" = "200" ] && { log "READY after ~$((i*10))s ($CUR)"; write_motd "$CUR"; update_litellm "$CUR"; exit 0; }
       [ $((i % 6)) -eq 0 ] && log "  still loading ($((i*10))s)..."
     done
     log "TIMEOUT. Check: podman logs $(lane_box "$CUR")"
@@ -222,6 +262,7 @@ case "${1:-}" in
     CUR=$(read_state)
     if model_serving "$CUR"; then
       log "model '$CUR' already serving. Updating motd only."
+      update_litellm "$CUR"
     else
       log "ensuring model '$CUR' (from $STATE)"
       stop_stack
@@ -230,7 +271,7 @@ case "${1:-}" in
       for i in $(seq 1 120); do
         sleep 10
         c=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8000/health 2>/dev/null) || c=000
-        [ "$c" = "200" ] && { log "READY after ~$((i*10))s ($CUR)"; write_motd "$CUR"; exit 0; }
+        [ "$c" = "200" ] && { log "READY after ~$((i*10))s ($CUR)"; write_motd "$CUR"; update_litellm "$CUR"; exit 0; }
         [ $((i % 6)) -eq 0 ] && log "  still loading ($((i*10))s)..."
       done
       log "TIMEOUT. Check: podman logs $(lane_box "$CUR")"

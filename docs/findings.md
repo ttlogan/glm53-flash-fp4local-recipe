@@ -198,7 +198,20 @@ Working config/state confirmed from the live logs:
 11. **deepseek isolation.** Both deepseek recipe and GLM used `eugr/spark-vllm-b12x:latest`;
     re-pulling `:latest` would silently move deepseek. PIN deepseek to its known-good digest
     `d7213eea` and GLM to `03a9565`, so each lane is immutable.
-12. **litellm contextWindow mismatch (still open, at the flip).** `/etc/litellm/config.yaml`
-    maps `dgx_hobo_default` -> the qwen upstream with NO contextWindow override, so litellm
-    would infer GLM's 1M context as qwen's 262K. Update the name mapping + contextWindow to
-    1M at the live swap; do NOT touch it while qwen was live.
+12. **litellm gateway must be re-synced on every model activation (orchestration).**
+    `/etc/litellm/config.yaml` maps the stable client alias `dgx_hobo_default` to whichever
+    lane is live on :8000. This used to be a manual step and went stale (a 404 for the old
+    qwen name after swapping to GLM). `swap-model.sh` now calls `update_litellm` on every
+    activation path (swap/restart/boot): it rewrites the upstream `model: openai/<served_name>`
+    and sets `model_info.context_window` (snake; the camelCase `contextWindow` under
+    `litellm_params` is NOT read by litellm). litellm is restarted after the rewrite. Do NOT
+    hand-edit the config on a lane change.
+13. **Served names are the display name everywhere (model-tui, sparkdash, litellm upstream).**
+    `sparkdash`/model-tui show whatever the lane serves via `/v1/models`. GLM originally
+    served `dgx_hobo_default` (the litellm client alias), so sparkdash showed that instead of
+    a model name. To match the other lanes, GLM now serves `glm-5.3-flash-fp4-local` and the
+    litellm client alias `dgx_hobo_default` maps onto it. Keep `served_name()` in swap-model.sh,
+    the `SERVED` map in model-tui, and the launcher `--served-model-name` in sync. The
+    `served_name()` case for deepseek was returning the WRONG name
+    (`deepseek-v4-flash-vision` vs actual `orcarouter-deepseek-v4-flash-vision-uncensored`),
+    so it's corrected.

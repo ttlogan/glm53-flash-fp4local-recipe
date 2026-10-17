@@ -88,7 +88,7 @@ podman run -d \
   -e INSTANTTENSOR_CHUNK_SIZE=8388608 -e INSTANTTENSOR_CONCURRENCY=1 -e INSTANTTENSOR_IO_DEPTH=3 \
   "$IMAGE" \
     vllm serve "${CMODEL_DIR}" \
-    --served-model-name dgx_hobo_default \
+    --served-model-name glm-5.3-flash-fp4-local \
     --host 0.0.0.0 --port "$PORT" \
     --trust-remote-code \
     --tensor-parallel-size 2 \

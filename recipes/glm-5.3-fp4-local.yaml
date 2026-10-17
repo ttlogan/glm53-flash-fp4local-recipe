@@ -69,5 +69,5 @@ command: |
     --reasoning-parser glm45 \
     --tool-call-parser glm47 \
     --enable-auto-tool-choice \
-    --served-model-name dgx_hobo_default \
+    --served-model-name glm-5.3-flash-fp4-local \
     --gpu-memory-utilization {gpu_memory_utilization}

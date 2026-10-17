@@ -49,7 +49,7 @@ CONTAINERS = {
 # lane_key -> served model name (sync with swap-model.sh served_name()).
 SERVED = {
     "deepseek": "orcarouter-deepseek-v4-flash-vision-uncensored",
-    "glm": "dgx_hobo_default",
+    "glm": "glm-5.3-flash-fp4-local",
     "qwen38": "qwen3.8-flash-next-uncensored",
 }
 
