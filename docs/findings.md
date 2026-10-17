@@ -97,3 +97,37 @@ KV fit at `gpu-memory-utilization 0.87` on the 2x128G pool, `--distributed-execu
 (whether the B12X image's `mp` path works for 2-node, vs the deepseek lane's Ray),
 and whether `/opt/lil/runtime/templates/glm53-flash.jinja` vs the checkpoint's own
 `chat_template.jinja` is correct.
+
+## Review pass 2 (2026-10-17) — expert team (3 reviewers)
+Verdict: serving flags confirmed valid; orchestration CONCERNS; ops INVARIANTS PASS
+(qwen/deepseek byte-preserved). Additional fixes applied:
+- FIXED (`ops/swap-model.sh` stop_stack): the final `:8000` check was
+  `ss | grep -q && { exit 1; }`, which returns nonzero when `:8000` is ALREADY free
+  (grep exit 1) and, under `set -e`, aborted a `--swap`/restart mid-teardown after
+  qwen was stopped. Rewritten as `if ...; then ...; fi` so a free port is a normal
+  return, not an abort. This was pre-existing but is the one real hazard on the glm
+  swap path (would strand `:8000` down).
+- FIXED (`glm53-fp4local-vllm.sh`): model-dir resolution now pins to the exact
+  `$REVISION` snapshot (was `ls | head -1`, arbitrary if multiple snapshots) and
+  verifies every weight shard is present via `model.safetensors.index.json`
+  (config.json lands before the weights, so the old guard passed on a partial
+  download).
+- FIXED (`recipes/glm-5.3-fp4-local.yaml`): removed `kv_cache_memory_bytes: 8G`
+  (in this fork it OVERRIDES `gpu_memory_utilization`, capping KV below 1M) — now
+  uses only `gpu_memory_utilization 0.87`; set `container` to the actual
+  `docker.io/eugr/spark-vllm-b12x:latest`; added `--served-model-name dgx_hobo_default`.
+
+## Deploy-blocking (do before the live GLM swap)
+- `/etc/litellm/config.yaml` maps `dgx_hobo_default` -> `openai/qwen3.8-flash-next-uncensored`
+  (api_base http://127.0.0.1:8000/v1) with NO `contextWindow`/max_tokens override. On
+  the GLM swap the :8000 backend serves name `dgx_hobo_default` (not the qwen model
+  name) and litellm would infer the 1M context as qwen's 262K + send the stale
+  upstream model name. Update name + `contextWindow` to 1M at swap time. Also update
+  the served-name mapping so `dgx_hobo_default` resolves to the GLM backend.
+- Stale references to the deleted `/models/glm-5.3-flash-nvfp4` / `/models/dflash2-draft`
+  (harmless now but clean up before enabling): disabled `glm53-vllm.service` (leo+raph,
+  ExecStart=/home/wfoster/glm53-vllm.sh), `/usr/local/bin/launch-glm.sh`,
+  `/home/wfoster/glm53-vllm.sh`, `/home/wfoster/glm53-vllm-dflash2.sh`,
+  `/home/wfoster/update-motd-model.sh`, `/opt/glm53/update-motd-model.sh`,
+  `/home/wfoster/qwen38-flash-next-recipe/scripts/swap-model.sh`. Active boot unit is
+  `dgx-model.service` (runs the clean swap-model.sh), which is unaffected.

@@ -32,9 +32,19 @@ esac
 # the HOST ($HF_CACHE); it is bind-mounted to /root/.cache/huggingface inside the
 # container. Use the host path for the existence check, the container path for the
 # vllm model/chat-template args.
-HOST_MODEL_DIR="$(ls -d "${HF_CACHE}/hub/${HF_REPO}/snapshots/"* 2>/dev/null | head -1 || true)"
-[[ -n "$HOST_MODEL_DIR" && -f "${HOST_MODEL_DIR}/config.json" ]] || {
-  echo "nvidia GLM-5.3-Flash-FP4-Local not in HF cache: ${HF_CACHE}/hub/${HF_REPO} (still downloading?)" >&2
+# Pin to the exact revision snapshot (deterministic, no head -1 ambiguity) and
+# require every weight shard to be present so we never launch against a partial
+# download (config.json lands long before the shards).
+HOST_MODEL_DIR="${HF_CACHE}/hub/${HF_REPO}/snapshots/${REVISION}"
+idx="${HOST_MODEL_DIR}/model.safetensors.index.json"
+[[ -f "${HOST_MODEL_DIR}/config.json" && -f "$idx" ]] || {
+  echo "nvidia GLM-5.3-Flash-FP4-Local not in HF cache: ${HOST_MODEL_DIR} (still downloading?)" >&2
+  exit 4
+}
+expected=$(grep -oE 'model-[0-9]+-of-[0-9]+' "$idx" | sort -u | wc -l)
+actual=$(find "${HOST_MODEL_DIR}" -maxdepth 1 -name 'model-*.safetensors' -size +1M | wc -l)
+[[ "$expected" -gt 0 && "$actual" -ge "$expected" ]] || {
+  echo "nvidia GLM-5.3-Flash-FP4-Local incomplete: ${actual}/${expected} shards (still downloading?)" >&2
   exit 4
 }
 CMODEL_DIR="/root/.cache/huggingface${HOST_MODEL_DIR#${HF_CACHE}}"

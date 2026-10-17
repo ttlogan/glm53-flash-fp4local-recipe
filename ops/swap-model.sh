@@ -154,7 +154,7 @@ stop_stack() {
     sleep 2
     [ $((i % 6)) -eq 0 ] && echo "   still waiting ($((i*2))s)..."
   done
-  sudo ss -ltn 2>/dev/null | grep -q ":8000 " && { echo ":8000 still busy" >&2; exit 1; }
+  if sudo ss -ltn 2>/dev/null | grep -q ":8000 "; then echo ":8000 still busy" >&2; exit 1; fi
 }
 
 case "${1:-}" in

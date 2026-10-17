@@ -6,7 +6,8 @@ name: GLM-5.3-Flash-FP4-Local
 description: vLLM B12X serving nvidia/GLM-5.3-Flash-FP4-Local on a dual DGX Spark/GX10 cluster
 
 model: nvidia/GLM-5.3-Flash-FP4-Local
-container: vllm-node-b12x
+# Actual image on the cluster (the deployed/launcher path uses this same image).
+container: docker.io/eugr/spark-vllm-b12x:latest
 
 build_args:
   - --exp-b12x
@@ -26,7 +27,6 @@ defaults:
   max_num_seqs: 4
   max_num_batched_tokens: 4096
   num_speculative_tokens: 3
-  kv_cache_memory_bytes: 8G
   gpu_memory_utilization: 0.87
 
 env:
@@ -69,5 +69,5 @@ command: |
     --reasoning-parser glm45 \
     --tool-call-parser glm47 \
     --enable-auto-tool-choice \
-    --kv-cache-memory-bytes {kv_cache_memory_bytes} \
+    --served-model-name dgx_hobo_default \
     --gpu-memory-utilization {gpu_memory_utilization}
