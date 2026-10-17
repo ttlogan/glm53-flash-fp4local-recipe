@@ -13,7 +13,7 @@ set -euo pipefail
 NODE_RANK="${1:?usage: glm53-fp4local-vllm.sh <0|1>}"
 [[ "$NODE_RANK" == "0" || "$NODE_RANK" == "1" ]] || { echo "rank must be 0 or 1" >&2; exit 2; }
 
-IMAGE="${IMAGE:-docker.io/eugr/spark-vllm-b12x:latest}"
+IMAGE="${IMAGE:-docker.io/eugr/spark-vllm-b12x@sha256:03a956544e9f9b4b7ba91690469fbe7848bdbef29a7d2e0f5788368467bb3595}"
 NAME="${NAME:-vllm_glm53}"
 HF_CACHE="/home/wfoster/.cache/huggingface"
 HF_REPO="models--nvidia--GLM-5.3-Flash-FP4-Local"
