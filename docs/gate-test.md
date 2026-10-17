@@ -59,10 +59,22 @@ published checkpoint does not carry. So the launcher/recipe 1M value is correct.
   RoCE fabric; note the cluster's proven fabric is Socket, so RoCE ("twins" + separate
   subnets + workers-before-head) would be a new, untested path.
 
-## 2026-10-17 — download monitor
-- leo: resuming after the Xet failure. 37 blobs / ~92G of 166G, `hf download` pid
-  1032076 alive. Will call out to the user to STOP QWEN (via model-tui, per user) once
-  leo reaches 52 blobs / full, then run the smoke test (PORT=8001, NAME=vllm_glm53_smoke,
-  MPORT=29523, served dgx_hobo_default).
-- raph: complete (166G, 52 blobs).
+## 2026-10-17 — model-tui ACTIVE-clears fix (user reported after --stop)
+- Bug (pre-existing, flagged in review pass 1/2): `active_model()` trusted
+  `/etc/vllm/current_model` (the boot DEFAULT = last-used), so after a `--stop`
+  the stopped model still showed the green ACTIVE dot though :8000 was free.
+- Fix: `active_model()` now probes `http://127.0.0.1:8000/v1/models` and matches the
+  served model name back to a lane via a new `SERVED` map (sync with
+  `swap-model.sh served_name()`); if nothing is listening it returns None and the
+  ACTIVE dot clears. Trimmed the now-unused `STATE_FILE`.
+- Verified on leo with qwen down: `_serving_lane()` / `active_model()` return None.
+  Deployed, committed, pushed (954b2db).
+- Note: `SERVED` must stay in sync with `swap-model.sh served_name()` (deepseek=
+  orcarouter-deepseek-v4-flash-vision-uncensored, glm=dgx_hobo_default,
+  qwen38=qwen3.8-flash-next-uncensored).
+
+## 2026-10-17 — download monitor (continued)
+- leo: 130G -> 142G / 166G, 45/52 blobs, 8 in-flight, hf download alive. ~24G to go.
+- qwen STOPPED (per user via model-tui) on both nodes; :8000 free; leo GPU ~112G free.
+
 
